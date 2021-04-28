@@ -659,7 +659,7 @@ update.")
 (defvar which-key--ignore-non-evil-keys-regexp
   (eval-when-compile
     (regexp-opt '("mouse-" "wheel-" "remap" "drag-" "scroll-bar"
-                  "select-window" "switch-frame" "which-key"))))
+                  "select-window" "switch-frame" "<intercept-state>"))))
 (defvar which-key--ignore-keys-regexp
   (eval-when-compile
     (regexp-opt '("mouse-" "wheel-" "remap" "drag-" "scroll-bar"
@@ -1466,6 +1466,24 @@ checked."
                (string-match-p binding-regexp
                                (cdr key-binding)))))))
 
+(defun which-key--get-pseudo-binding (key-binding &optional prefix)
+  (let* ((key (kbd (car key-binding)))
+         (pseudo-binding (key-binding (which-key--pseudo-key key prefix))))
+    (when pseudo-binding
+      (let* ((command-replacement (cadr pseudo-binding))
+             (pseudo-desc (car command-replacement))
+             (pseudo-def (cdr command-replacement)))
+        (when (and (stringp pseudo-desc)
+                   (or (null pseudo-def)
+                       ;; don't verify keymaps
+                       (keymapp pseudo-def)
+                       (eq pseudo-def (key-binding key))))
+          (cons (car key-binding) pseudo-desc))))))
+(defun which-key-is-pseudo-bind-p (def)
+  " Simple Test for the def part of a key-def from a keymap "
+  (and (listp def) (eq (car def) 'which-key))
+)
+
 (defsubst which-key--replace-in-binding (key-binding repl)
   (cond ((or (not (consp repl)) (null (cdr repl)))
          key-binding)
@@ -1735,6 +1753,69 @@ alists. Returns a list (key separator description)."
                  final-desc)
            new-list))))
     (nreverse new-list)))
+
+(defun which-key--get-keymap-bindings (keymap &optional all prefix)
+  " Given a keymap, return a list of tuples (KEY . DEF),
+where DEF *might* be a which-key pseudo-binding.
+
+ALL enables recursion into prefix-maps,
+PREFIX is used to accumulate those prefixes as the recursion progresses
+"
+  (let (bindings)
+    (map-keymap
+     (lambda (ev def)
+       (let* ((key (append prefix (list ev)))
+              (key-desc (key-description key))
+              )
+         (cond ((or (string-match-p which-key--ignore-non-evil-keys-regexp key-desc)
+                    (eq ev 'menu-bar)))
+               ;; Important: if a which-key pseudo-map, handle here:
+               ((eq (car key) 'which-key)
+                (setq bindings (cl-remove-duplicates
+                                (append bindings
+                                        (which-key--get-keymap-bindings def all prefix))
+                                :test (lambda (a b) (string= (car a) (car b))))))
+               ;; extract evil keys corresponding to current state
+               ((and (keymapp def)
+                     (boundp 'evil-state)
+                     (bound-and-true-p evil-local-mode)
+                     (string-match-p (format "<%s-state>$" evil-state) key-desc))
+                (setq bindings
+                      ;; this function keeps the latter of the two duplicates
+                      ;; which will be the evil binding
+                      (cl-remove-duplicates
+                       (append bindings
+                               (which-key--get-keymap-bindings def all prefix))
+                       :test (lambda (a b) (string= (car a) (car b))))))
+               ((and (keymapp def)
+                     (string-match-p which-key--evil-keys-regexp key-desc))
+                ;;(message "Ignoring def because evil state isnt active key: %s : %s" key-desc def)
+                )
+               ((and (keymapp def)
+                     (or all
+                         ;; event 27 is escape, so this will pick up meta
+                         ;; bindings and hopefully not too much more
+                         (and (numberp ev) (= ev 27))))
+                (setq bindings
+                      (append bindings
+                              (which-key--get-keymap-bindings def t key))))
+               (t
+                ;; TODO force which-key entries to override others
+                (when def
+                  (cl-pushnew
+                   (cons key-desc
+                         (cond
+                          ((which-key-is-pseudo-bind-p def) def)
+                          ((keymapp def) "Prefix Command")
+                          ((symbolp def) (copy-sequence (symbol-name def)))
+                          ((eq 'lambda (car-safe def)) "lambda")
+                          ((eq 'menu-item (car-safe def)) "menu-item")
+                          ((stringp def) def)
+                          ((vectorp def) (key-description def))
+                          (t "unknown")))
+                   bindings :test (lambda (a b) (string= (car a) (car b)))))))))
+     keymap)
+    bindings))
 
 (defun which-key--compute-binding (binding)
   "Replace BINDING with remapped binding if it exists.
