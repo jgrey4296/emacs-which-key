@@ -1914,13 +1914,48 @@ Requires `which-key-compute-remaps' to be non-nil"
   )
 
 (defun which-key--get-current-bindings (&optional prefix)
-  "Generate a list of current active bindings."
-  (let (bindings)
-    (dolist (map (current-active-maps t) bindings)
-      (when (cdr map)
-        (setq bindings
-              (which-key--get-keymap-bindings
-               map bindings prefix filter))))))
+  "Generate a list of current active bindings. "
+  ;; TODO use which-key-current-binding-considerations
+  (let* ((leader-map (if (string-prefix-p doom-leader-key (key-description prefix)) doom-leader-map))
+         (major-mode-map-sym (intern (format "%s-map" major-mode)))
+         (evil-state-map-sym (intern (format "evil-%s-state-map" evil-state)))
+         ;; TODO evil local maps, override, intercept
+         (active-minor-modes (which-key--get-active-minor-modes))
+         (minor-mode-maps (mapcar #'(lambda (x) (alist-get x minor-mode-map-alist))
+                                                     active-minor-modes))
+         (active-maps (-filter #'identity (seq-concatenate 'list (mapcar #'symbol-value (list major-mode-map-sym evil-state-map-sym))
+                                                           minor-mode-maps)))
+         (prefix-handled (which-key--consume-prefix-on-maps prefix active-maps evil-state))
+         (ignore-bindings '("self-insert-command" "ignore"
+                            "ignore-event" "company-ignore"))
+         unformatted bindings)
+
+    (if leader-map
+        (setq prefix-handled (append (which-key--consume-prefix-on-maps
+                                      (vconcat (cdr (append prefix nil)))
+                                      `(,leader-map) evil-state)
+                                     prefix-handled)))
+
+    (setq unformatted (mapcar #'which-key--get-keymap-bindings prefix-handled))
+
+    ;; Loop over all found bindings, filtering as necessary
+    ;; TODO this would be better to do later, so as to only use maybe-replace once
+    (loop for bind-pair in (-flatten-n 1 (-filter #'identity unformatted)) do
+          (let* ((formatted (which-key--maybe-replace bind-pair prefix))
+                 (key (car formatted))
+                 (binding (cdr formatted))
+                )
+            (cond ((null key))
+                  ((member binding ignore-bindings))
+                  ((string-match-p which-key--ignore-keys-regexp key))
+                  ((unless (assoc-string key bindings)
+                     (push (cons key (which-key--compute-binding binding))
+                           bindings))))))
+
+    (nreverse bindings)
+    )
+  )
+
 
 (defun which-key--get-bindings (&optional prefix keymap filter recursive)
   "Collect key bindings.
