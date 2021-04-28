@@ -1886,25 +1886,34 @@ Requires `which-key-compute-remaps' to be non-nil"
        prefix-map))
     bindings))
 
-(defun which-key--get-keymap-bindings
-    (keymap &optional start prefix filter all evil)
-  "Retrieve top-level bindings from KEYMAP.
-PREFIX limits bindings to those starting with this key
-sequence. START is a list of existing bindings to add to.  If ALL
-is non-nil, recursively retrieve all bindings below PREFIX. If
-EVIL is non-nil, extract active evil bidings."
-  (let ((bindings start)
-        (ignore '(self-insert-command ignore ignore-event company-ignore))
-        (evil-map
-         (when (and evil (bound-and-true-p evil-local-mode))
-           (lookup-key keymap (kbd (format "<%s-state>" evil-state))))))
-    (when (keymapp evil-map)
-      (setq bindings (which-key--get-keymap-bindings-1
-                      evil-map bindings prefix filter all ignore)))
-    (which-key--get-keymap-bindings-1
-     keymap bindings prefix filter all ignore)))
+(defun which-key--get-active-minor-modes ()
+  " Get a list of minor modes whose variable is true "
+  (let* ((minor-modes minor-mode-list)
+         (bound-vars (-filter #'boundp minor-modes))
+         (active-minor-modes (-filter #'symbol-value bound-vars))
+         )
+    active-minor-modes
+    )
+  )
 
-(defun which-key--get-current-bindings (&optional prefix filter)
+(defun which-key--consume-prefix-on-maps (prefix maps &optional state)
+ " Take a prefix vector, and a list of maps
+    lookup-key recursively, returning only keymaps
+  "
+ ;; Lookup evil state aux maps *as well* initially
+ (let* ((current (concatenate 'list (mapcar #'(lambda (x) (lookup-key x (vector (intern (format "%s-state" state))))) maps)
+                              maps))
+         )
+    (loop for pre across prefix do
+          (setq current (mapcar #'(lambda (x) (if (keymapp x)
+                                             (lookup-key x (vector pre))))
+                                current))
+          )
+    (-filter #'keymapp current)
+    )
+  )
+
+(defun which-key--get-current-bindings (&optional prefix)
   "Generate a list of current active bindings."
   (let (bindings)
     (dolist (map (current-active-maps t) bindings)
