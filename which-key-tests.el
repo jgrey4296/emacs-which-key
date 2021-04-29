@@ -40,10 +40,18 @@
       "C-c" "mymap2")
     (define-key map "\C-ca" 'foo)
     (should (equal
-             (which-key--get-keymap-bindings map)
-             '(("C-a" . "mycomplete")
-               ("C-b" . "group:mymap")
-               ("C-c" . "group:mymap2"))))))
+             (which-key--maybe-replace '("C-c C-a" . "complete"))
+             '("C-c C-a" . "complete")))
+    (should (equal
+             (which-key--maybe-replace `("C-c C-a" . (which-key "mycomplete" complete)))
+             '("C-c C-a" . "mycomplete")))
+    (should (equal
+             (which-key--maybe-replace '("C-c C-b" . "mymap"))
+             '("C-c C-b" . "mymap")))
+    (should (equal
+             (which-key--maybe-replace '("C-c C-b" . ""))
+             '("C-c C-b" . "")))))
+
 
 (ert-deftest which-key-test--prefix-declaration ()
   "Test `which-key-declare-prefixes' and
@@ -145,7 +153,7 @@
         (evil-local-mode t)
         (evil-state 'normal)
         which-key-replacement-alist)
-    (define-key map [which-key-a] '(which-key "blah"))
+    (define-key map "a" '(which-key "blah"))
     (define-key map "b" 'ignore)
     (define-key map "c" "c")
     (define-key map "dd" "dd")
@@ -157,16 +165,8 @@
     (should (equal
              (sort (which-key--get-keymap-bindings map)
                    (lambda (a b) (string-lessp (car a) (car b))))
-             '(("M-g" . "prefix")
-               ("c" . "c")
-               ("d" . "prefix")
-               ("e" . "prefix")
-               ("f" . "{ - C-f"))))
-    (should (equal
-             (sort (which-key--get-keymap-bindings map nil nil nil nil t)
-                   (lambda (a b) (string-lessp (car a) (car b))))
-             '(("C-h" . "C-h-normal")
-               ("M-g" . "prefix")
+             '(("a" . (which-key "blah"))
+               ("b" . "ignore")
                ("c" . "c")
                ("d" . "prefix")
                ("e" . "prefix")
@@ -174,7 +174,8 @@
     (should (equal
              (sort (which-key--get-keymap-bindings map nil nil nil t)
                    (lambda (a b) (string-lessp (car a) (car b))))
-             '(("M-g g" . "M-gg")
+             '(("a" . (which-key "blah"))
+               ("b" . "ignore")
                ("c" . "c")
                ("d d" . "dd")
                ("e e e" . "eee")
